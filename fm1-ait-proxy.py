@@ -441,12 +441,12 @@ def verify(token, issue_id, wanted):
     return issue, mismatches
 
 
-def clean_changes(changes, schema):
+def clean_changes(changes, schema, allow_protected=False):
     out = {}
     for name, value in (changes or {}).items():
         if name not in schema["writable"]:
             raise RuntimeError(f"Field '{name}' cannot be changed from the dashboard")
-        if name == "Task Type" and str(value or "").strip().lower() in PROTECTED_TASK_TYPES:
+        if name == "Task Type" and not allow_protected and str(value or "").strip().lower() in PROTECTED_TASK_TYPES:
             raise RuntimeError("Stream and Block issues cannot be created from the dashboard")
         out[name] = value
     s, e = to_ms(out.get("Start Date and Time")), to_ms(out.get("End Date and Time"))
@@ -475,7 +475,7 @@ def create_activity(token, body):
     summary = str(body.get("summary") or "").strip()
     if not summary:
         raise RuntimeError("Summary is required")
-    changes = clean_changes(body.get("fields"), schema)
+    changes = clean_changes(body.get("fields"), schema, allow_protected=True)
     custom = [encode_field(n, v, schema["fields"][n]) for n, v in changes.items()]
     payload = {"project": {"id": schema["projectId"]}, "summary": summary, "customFields": custom}
     if body.get("description"):
