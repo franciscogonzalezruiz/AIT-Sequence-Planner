@@ -314,7 +314,8 @@ details.help>div{margin-top:6px;line-height:1.65;max-width:1080px}
     <div class="f search"><label for="fSearch">Search</label><input id="fSearch" placeholder="Issue, activity, block…"></div>
     <div class="f"><span>Layers</span><div class="chips">
       <label class="chip"><input type="checkbox" id="showProg" checked>Program (NYXE)</label>
-      <label class="chip"><input type="checkbox" id="showEmpty" checked>Blocks without activities</label>
+      <label class="chip" title="Show only activities and milestones whose dates overlap the From / To period"><input type="checkbox" id="onlyPeriod" checked>Only items in period</label>
+<label class="chip"><input type="checkbox" id="showEmpty" checked>Blocks without activities</label>
       <label class="chip"><input type="checkbox" id="gDeps" checked>Dependency arrows</label>
       <label class="chip"><input type="checkbox" id="gPlan">Planned dates (rules)</label>
     </div></div>
@@ -718,9 +719,11 @@ function renderGantt(){HY.prepGantt();
   const track=inner=>`<div class="gtrack">${grid}${todayL}${inner}</div>`;
   let h=`<div class="grow gaxis"><div class="glab">Stream / Block / Activity</div><div class="gtrack">${ticks}${HY.axisMarks()}</div></div>`;
   const T=types(),prog=$('showProg').checked,showEmpty=$('showEmpty').checked,itemF=itemFilterActive();
+  const onlyP=$('onlyPeriod')?$('onlyPeriod').checked:false;
+  const periodOk=r=>{if(!onlyP)return true;const s=okDate(r.start)?String(r.start).slice(0,10):null;if(!s)return false;const e=okDate(r.end)?String(r.end).slice(0,10):s;return s<=to&&e>=from};
   const childTypesActive=T.has('Activity')||T.has('Milestone');
   const itemTypeFiltered=childTypesActive&&(!T.has('Activity')||!T.has('Milestone'));
-  const pruneEmpty=childTypesActive&&(itemF||itemTypeFiltered);
+  const pruneEmpty=childTypesActive&&(itemF||itemTypeFiltered||onlyP);
   const filterKey=JSON.stringify({types:sel('fType').slice().sort(),streams:sel('fStream').slice().sort(),teams:sel('fTeam').slice().sort(),states:sel('fState').slice().sort(),search:$('fSearch').value.trim()});
   const filterChanged=renderGantt._filterKey!==filterKey;
   renderGantt._filterKey=filterKey;
@@ -734,7 +737,7 @@ function renderGantt(){HY.prepGantt();
     return`<div class="grow ${isM?'r-ms':'r-act'}${HY.rowCls(r)}" data-id="${esc(r.id)}"><div class="glab" style="padding-left:${8+indent*16}px"><div class="name">${HY.selBox(r)}<span class="ttag ${isM?'t-M':'t-A'}">${isM?'MS':'ACT'}</span><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.id)} · ${esc(r.summary)}</a>${fl}${canEdit?`<button class="rowbtn" data-edit="${esc(r.id)}" title="Edit ${esc(r.id)} in YouTrack" aria-label="Edit ${esc(r.id)}">✎</button>`:''}</div><div class="meta">${meta}</div><div class="rr-line">${HY.rrChip(r,EDIT_OK())}</div></div>${track(bar)}</div>`};
   letters.forEach(L=>{if(!streamMatch(L))return;const s=model.S.get(L);
     const blocks=[...s.blocks.values()].sort((a,b)=>{const ap=a.code.startsWith('('),bp=b.code.startsWith('(');if(ap!==bp)return ap?1:-1;return firstActivityStart(a).localeCompare(firstActivityStart(b))||natural(a.code,b.code)});
-    const vis=blocks.map(b=>({b,acts:T.has('Activity')?b.acts.filter(itemMatch):[],ms:T.has('Milestone')?b.ms.filter(itemMatch):[]})).filter(x=>{if(pruneEmpty)return x.acts.length||x.ms.length;return showEmpty||x.b.acts.length||x.b.ms.length||x.b.fdi.length});
+    const vis=blocks.map(b=>({b,acts:T.has('Activity')?b.acts.filter(itemMatch).filter(periodOk):[],ms:T.has('Milestone')?b.ms.filter(itemMatch).filter(periodOk):[]})).filter(x=>{if(pruneEmpty)return x.acts.length||x.ms.length;return showEmpty||x.b.acts.length||x.b.ms.length||x.b.fdi.length});
     if(pruneEmpty&&!vis.length)return;
     const sk='S:'+L;let indent=0;
     if(T.has('Stream')){nS++;const f=s.fdi[0];
@@ -1091,7 +1094,7 @@ function diffList(){const{v}=check();const o=FORM.orig;const ch={};let summary=n
 function review(){HY.readLinkInputs();const{v,ch,summary}=diffList();const o=FORM.orig;
   if(FORM.mode==='edit'&&!Object.keys(ch).length&&summary==null){toast('No changes to save.','warn');return}
   const rows=(FORM.mode==='create'?[['Summary','',v.summary]]:summary!=null?[['Summary',o.summary,summary]]:[]).concat(Object.entries(ch).map(([n,b])=>[n,FORM.mode==='create'?'':(o[HY.formKey(n)]??''),b]));
-  $('mBody').innerHTML=`<div class="rev"><p>${FORM.mode==='create'?`This will create a new <b>${KIND_LABEL[FORM.kind]||'activity'}</b> in YouTrack project <b>FDI</b> as <b>${esc(SCHEMA.me||'your user')}</b>:`:`This will update <b>${esc(FORM.r.id)}</b> in YouTrack as <b>${esc(SCHEMA.me||'your user')}</b>:`}</p>
+  $('mBody').innerHTML=`<div class="rev"><p>${FORM.mode==='create'?`This will create a new <b>${/^milestone$/i.test(String(v.ttype||''))?'milestone':(KIND_LABEL[FORM.kind]||'activity')}</b> in YouTrack project <b>FDI</b> as <b>${esc(SCHEMA.me||'your user')}</b>:`:`This will update <b>${esc(FORM.r.id)}</b> in YouTrack as <b>${esc(SCHEMA.me||'your user')}</b>:`}</p>
    <table><tr><th>Field</th>${FORM.mode==='edit'?'<th>Now</th>':''}<th>${FORM.mode==='edit'?'New':'Value'}</th></tr>${rows.map(r=>`<tr><td>${esc(r[0])}</td>${FORM.mode==='edit'?`<td class="old">${esc(r[1]===''||r[1]==null?'—':r[1])}</td>`:''}<td class="new">${esc(r[2]===''?'(empty)':r[2])}</td></tr>`).join('')}</table>
    ${FORM.mode==='edit'?'<p class="sub">If someone changed this issue in YouTrack after you loaded it, nothing will be saved and you will be asked to refresh.</p>':''}</div>`;
   HY.afterReview();FORM.pending={v,ch,summary};$('mSave').textContent=FORM.mode==='create'?'Create in YouTrack':'Save to YouTrack';$('mSave').dataset.step='commit';$('mSave').disabled=false;$('mBack').style.display='';
@@ -1148,6 +1151,7 @@ const HY={barMode:'yt',showDeps:true,showPlan:false,sel:[],pendingLink:null,moda
 const DT_FIELDS=new Set(['Start Date and Time','End Date and Time']);
 HY.wallInput=function(ms){if(ms==null||ms==='')return '';const w=PE.utcToWall(Number(ms));return new Date(w).toISOString().slice(0,16)};
 HY.inputWall=function(v){const m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);return m?Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5]):null};
+HY.fmtD=function(w){if(w==null)return '—';return new Date(w).toLocaleDateString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',year:'2-digit'})};
 HY.fmtW=function(w){if(w==null)return '—';return new Date(w).toLocaleString('en-GB',{timeZone:'UTC',day:'2-digit',month:'short',year:'2-digit',hour:'2-digit',minute:'2-digit'})};
 HY.fmtMs=function(ms){return ms==null?'—':HY.fmtW(PE.utcToWall(Number(ms)))};
 HY.startW=function(r){return r.startMs!=null?PE.utcToWall(r.startMs):(okDate(r.start)?toT(r.start)+8*3600e3:null)};
@@ -1252,7 +1256,9 @@ HY.itemBar=function(r,isM,canE){const c=HY.ctx,F0=toT(c.from),SPAN=c.total*DAY,X
   const drag=canE&&!r.protected&&r.startMs!=null&&r.endMs!=null;
   const title=`${r.id} · ${r.summary}\n${mode==='dur'?'Start + Duration ('+PE.durText(r)+', '+(PE.RULE_LABELS[PE.schedulingRule(r)]||'')+')':'YouTrack dates'}: ${HY.fmtW(sW)} → ${HY.fmtW(eW)}${drag?'\nDrag to move, drag an edge to resize':''}`;
   const tags=HY.depTags(r,a,b);
-  return ghost+`<span${drag?` data-id="${esc(r.id)}"`:''} class="bar ${stateCls(r.state)} main${mode==='dur'?' dur':''}${drag?' drag':''}${pc}" style="left:${a}%;width:${w}%" title="${esc(title)}">${gaps}</span>${tags}`};
+  const sLbl=sW<F0?`<span class="gtag" style="left:2px">◂ ${esc(HY.fmtD(sW))}</span>`:`<span class="gtag" style="right:calc(${(100-a).toFixed(3)}% + 5px)">${esc(HY.fmtD(sW))}</span>`;
+  const eLbl=eW>F0+SPAN?`<span class="gtag" style="right:4px">${esc(HY.fmtD(eW))} ▸</span>`:`<span class="gtag" style="left:calc(${b.toFixed(3)}% + 5px)">${esc(HY.fmtD(eW))}</span>`;
+  return ghost+sLbl+eLbl+`<span${drag?` data-id="${esc(r.id)}"`:''} class="bar ${stateCls(r.state)} main${mode==='dur'?' dur':''}${drag?' drag':''}${pc}" style="left:${a}%;width:${w}%" title="${esc(title)}">${gaps}</span>${tags}`};
 
 /* ---------- after each Gantt render ---------- */
 HY.afterGantt=function(){document.querySelectorAll('#gantt .jump').forEach(a=>a.onclick=e=>{e.preventDefault();e.stopPropagation();const row=document.querySelector(`#gantt .grow[data-id="${a.dataset.jump}"]`);if(!row){toast(`${a.dataset.jump} is hidden by the current filters`,'warn');return}row.scrollIntoView({block:'center',behavior:'smooth'});row.classList.add('flash');setTimeout(()=>row.classList.remove('flash'),1600)});
@@ -1426,12 +1432,12 @@ HY.init=function(){
 $('refresh').onclick=()=>load();$('testBtn').onclick=()=>load();
 $('configBtn').onclick=()=>{$('moreMenu').open=false;const c=$('config');c.style.display=c.style.display==='block'?'none':'block'};
 $('clearToken').onclick=async()=>{try{await proxy('/youtrack',{action:'clear_token'});$('configStatus').textContent='Saved token removed'}catch(e){$('configStatus').textContent=e.message}};
-['showProg','showEmpty','gFrom','gTo'].forEach(id=>$(id).addEventListener('change',renderView));['fStream','fTeam','fState'].forEach(id=>$(id).addEventListener('input',renderView));
+['showProg','showEmpty','onlyPeriod','gFrom','gTo'].forEach(id=>$(id).addEventListener('change',renderView));['fStream','fTeam','fState'].forEach(id=>$(id).addEventListener('input',renderView));
 $('fSearch').addEventListener('input',()=>{clearTimeout(window.__q);window.__q=setTimeout(renderView,200)});
 $('fType').addEventListener('input',renderGantt);
 const ganttWidth=$('gLabelWidth');if(ganttWidth){const initialWidth=parseInt(getComputedStyle(document.documentElement).getPropertyValue('--label'),10)||420;ganttWidth.value=String(initialWidth);$('gLabelWidthValue').textContent=initialWidth+' px';ganttWidth.addEventListener('input',()=>{const width=Number(ganttWidth.value);document.documentElement.style.setProperty('--label',width+'px');$('gLabelWidthValue').textContent=width+' px';renderGantt()})}
 $('expandAll').onclick=()=>{collapsed.clear();renderGantt()};
-$('collapseAll').onclick=()=>{collapsed=new Set(allKeys('S'));renderGantt()};
+$('collapseAll').onclick=()=>{collapsed=new Set(allKeys());renderGantt()};
 $('toBlocks').onclick=()=>{collapsed=new Set(allKeys('B'));renderGantt()};
 document.querySelectorAll('#zooms button').forEach(b=>b.onclick=()=>{zoom=b.dataset.z;document.querySelectorAll('#zooms button').forEach(x=>x.classList.toggle('on',x===b));renderGantt()});
 document.querySelectorAll('#ranges button').forEach(b=>b.onclick=()=>{if(b.dataset.r==='2027'){$('gFrom').value='2027-01-01';$('gTo').value='2027-12-31'}else{let lo='2027-01-01',hi='2027-12-31';data.forEach(r=>{[r.start,r.end].forEach(d=>{if(okDate(d)){if(d<lo)lo=d;if(d>hi)hi=d}})});program.forEach(p=>[p.start,p.due].forEach(d=>{if(okDate(d)){if(d<lo)lo=d;if(d>hi)hi=d}}));$('gFrom').value=lo.slice(0,8)+'01';$('gTo').value=addDays(hi,31).slice(0,8)+'01'}document.querySelectorAll('#ranges button').forEach(x=>x.classList.toggle('on',x===b));renderGantt()});
